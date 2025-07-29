@@ -9,5 +9,6 @@ This is a Next.js application for QSnap, an OCR app that extracts characters fro
 3. Copy the key and go back to the ".env" file created
 4. Create a variable called GEMINI_API_KEY
 
-It should look something like this
+It should look something like this: 
+
 GEMINI_API_KEY = "Your Gemni API key"
