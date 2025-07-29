@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, type ChangeEvent } from "react";
+import { useState, useRef, type ChangeEvent } from "react";
 import Image from "next/image";
 import {
   UploadCloud,
@@ -23,13 +23,9 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { validateUserEdits } from "./actions";
+import { validateUserEdits, extractText } from "./actions";
 import { cn } from "@/lib/utils";
 import type { CorrectUserEditsOutput } from "@/ai/flows/correct-user-edits";
-
-const MOCK_OCR_TEXT = `This is a sammple of extracted text from the document.
-It might contain some OCR errors like mispeled words or incorrect punctuation, which the user can fix.
-The AI will then validate the corrections to ensure accuracy.`;
 
 export default function Home() {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
@@ -39,34 +35,41 @@ export default function Home() {
   const [validationResult, setValidationResult] =
     useState<CorrectUserEditsOutput | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [isClient, setIsClient] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    setIsClient(true);
-  }, []);
-
-  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (imageUrl) {
-        URL.revokeObjectURL(imageUrl);
-      }
       setIsProcessing(true);
       setValidationResult(null);
+      setError(null);
+      setOriginalText("");
+      setEditedText("");
+      setOcrConfidence(null);
 
-      const newImageUrl = URL.createObjectURL(file);
-      setImageUrl(newImageUrl);
-
-      // Simulate OCR processing delay
-      setTimeout(() => {
-        setOriginalText(MOCK_OCR_TEXT);
-        setEditedText(MOCK_OCR_TEXT);
-        if (isClient) {
-          setOcrConfidence(Math.floor(Math.random() * (99 - 85 + 1) + 85));
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        const dataUri = event.target?.result as string;
+        if (imageUrl) {
+          URL.revokeObjectURL(imageUrl);
         }
-        setIsProcessing(false);
-      }, 1500);
+        setImageUrl(dataUri);
+
+        try {
+          const { extractedText, confidence } = await extractText(dataUri);
+          setOriginalText(extractedText);
+          setEditedText(extractedText);
+          setOcrConfidence(confidence);
+        } catch (err) {
+          setError(
+            err instanceof Error ? err.message : "An unknown error occurred."
+          );
+        } finally {
+          setIsProcessing(false);
+        }
+      };
+      reader.readAsDataURL(file);
     }
   };
 
@@ -183,29 +186,39 @@ export default function Home() {
                   </p>
                 </div>
               )}
-              {isProcessing && !ocrConfidence && (
+              {isProcessing && !originalText && (
                  <div className="flex flex-col items-center justify-center text-center h-96 bg-muted/50 rounded-lg">
                   <Loader2 className="h-12 w-12 text-primary animate-spin" />
                   <p className="mt-4 font-medium">Extracting Text...</p>
                   <p className="text-sm text-muted-foreground">
-                    Please wait while we analyze your document.
+                    Please wait while we analyze your document. This may take a moment.
                   </p>
                 </div>
               )}
 
-              {ocrConfidence && (
+              {error && (
+                <Alert variant="destructive">
+                  <AlertTriangle className="h-4 w-4" />
+                  <AlertTitle>Extraction Failed</AlertTitle>
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              )}
+
+              {originalText && (
                 <div className="space-y-4">
-                  <div>
-                    <label className="text-sm font-medium">
-                      OCR Confidence
-                    </label>
-                    <div className="flex items-center gap-3 mt-1">
-                      <Progress value={ocrConfidence} className="w-full" />
-                      <span className="font-mono text-sm font-semibold text-primary">
-                        {ocrConfidence}%
-                      </span>
+                  {ocrConfidence && (
+                    <div>
+                      <label className="text-sm font-medium">
+                        OCR Confidence
+                      </label>
+                      <div className="flex items-center gap-3 mt-1">
+                        <Progress value={ocrConfidence} className="w-full" />
+                        <span className="font-mono text-sm font-semibold text-primary">
+                          {ocrConfidence}%
+                        </span>
+                      </div>
                     </div>
-                  </div>
+                  )}
                   <Textarea
                     value={editedText}
                     onChange={(e) => setEditedText(e.target.value)}
@@ -241,14 +254,14 @@ export default function Home() {
                 </div>
               )}
             </CardContent>
-            {ocrConfidence && (
+            {originalText && (
               <CardFooter className="flex justify-end gap-3">
                 <Button
                   onClick={handleValidate}
                   disabled={isProcessing || !isTextEdited}
                   variant="outline"
                 >
-                  {isProcessing ? (
+                  {isProcessing && validationResult ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   ) : (
                     <Sparkles className="mr-2 h-4 w-4" />
